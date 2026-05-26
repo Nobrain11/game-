@@ -122,13 +122,19 @@ const MAGIC_BURN_AMOUNT = 100000;
 // These are public fantasy art images — swap for your own if desired.
 // Using Lexica / stable diffusion style public images via direct URL.
 const CLASS_IMAGES = {
-  warrior: 'https://images.unsplash.com/photo-1624138784614-87fd1b6528f8?w=600',
-  mage:    'https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=600',
-  archer:  'https://images.unsplash.com/photo-1519074069444-1ba4fff66d16?w=600',
-  tank:    'https://images.unsplash.com/photo-1562564055-71e051d33c19?w=600',
-  healer:  'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=600',
-  // Generic realm splash for /start
-  realm:   'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=600'
+  // Copy your images into the same folder as bot.js with these exact filenames:
+  // img_warrior.png   → Crystal Era Warrior  (IMG_2746.png)
+  // img_mage.jpeg     → Arcane Mage          (IMG_2754.jpeg)
+  // img_archer.jpeg   → Crystal Archer       (IMG_2745.jpeg)
+  // img_tank.png      → Crystal Army Cmdr    (IMG_2747.png)
+  // img_healer.jpeg   → Healer/Mage staff    (IMG_2755.jpeg)
+  // img_realm.jpeg    → Astralis Warrior     (IMG_2753.jpeg) — /start splash
+  warrior: path.join(__dirname, 'img_warrior.png'),
+  mage:    path.join(__dirname, 'img_mage.jpeg'),
+  archer:  path.join(__dirname, 'img_archer.jpeg'),
+  tank:    path.join(__dirname, 'img_tank.png'),
+  healer:  path.join(__dirname, 'img_healer.jpeg'),
+  realm:   path.join(__dirname, 'img_realm.jpeg'),
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -201,7 +207,7 @@ bot.start(async (ctx) => {
 
   // Send atmospheric realm image first
   await ctx.replyWithPhoto(
-    { url: 'https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=800' },
+    { source: CLASS_IMAGES.realm },
     {
       caption:
         `🌌 *Welcome to ASTRALIS*\n` +
@@ -250,7 +256,7 @@ bot.command('create', async (ctx) => {
 
   // Show warrior art to spark the fantasy
   await ctx.replyWithPhoto(
-    { url: 'https://images.unsplash.com/photo-1623091411395-09e79fdbfcf5?w=800' },
+    { source: CLASS_IMAGES.warrior },
     {
       caption:
         `🌌 *Choose Your Class*\n\n` +
@@ -290,7 +296,7 @@ Object.keys(CLASSES).forEach(cls => {
 
     // Send the class-specific hero image
     await ctx.replyWithPhoto(
-      { url: CLASS_IMAGES[cls] || CLASS_IMAGES.warrior },
+      { source: CLASS_IMAGES[cls] || CLASS_IMAGES.warrior },
       {
         caption: `${c.emoji} *Your ${c.label} awakens...*\n_The realm trembles at your arrival._`,
         parse_mode: 'Markdown'
