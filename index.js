@@ -257,7 +257,7 @@ bot.command('create', async (ctx) => {
         Object.entries(CLASSES).map(([, c]) => `${c.emoji} *${c.label}* — ${c.desc}`).join('\n') +
         `\n\n_Your destiny awaits..._`,
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(buttons)
+      reply_markup: Markup.inlineKeyboard(buttons).reply_markup
     }
   );
 });
@@ -284,6 +284,7 @@ Object.keys(CLASSES).forEach(cls => {
       `⚔️ ATK: ${s.attack}  🛡️ DEF: ${s.defense}\n` +
       `🔮 MAG: ${s.magic}  💨 SPD: ${s.speed}  🎯 CRIT: ${s.crit}%\n\n` +
       `_Your journey has begun. Use /mission to embark!_`,
+      undefined,
       { parse_mode: 'Markdown' }
     );
 
