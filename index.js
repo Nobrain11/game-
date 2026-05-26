@@ -1,42 +1,15 @@
-/**
- * ASTRALIS RPG BOT — Phase 1
- * Telegraf.js · Node.js · SQLite · Canvas
- * 
- * Commands:
- *   /start         — welcome
- *   /create        — create your character
- *   /profile       — view character card
- *   /mission       — go on a mission
- *   /collect       — collect mission rewards
- *   /inventory     — view items
- *   /equip [item]  — equip an item
- *   /stats         — view power stats
- *   /top           — leaderboard
- *   /help          — command list
- */
-
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const Database = require('better-sqlite3');
-const { createCanvas, loadImage, registerFont } = require('canvas');
 const path = require('path');
-const fs = require('fs');
-
-// ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const MAGIC_BURN_AMOUNT = 100_000; // MAGIC tokens to send on mission
-const MISSION_DURATIONS = {
-  quick:  15 * 60,       // 15 min
-  normal: 60 * 60,       // 1 hour
-  hard:   4  * 60 * 60,  // 4 hours
-  epic:   12 * 60 * 60,  // 12 hours
-};
+if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
 
-// ─── DATABASE ────────────────────────────────────────────────────────────────
+const bot = new Telegraf(BOT_TOKEN);
+const db = new Database(path.join(__dirname, 'astralis.db'));
 
-const db = new Database('./astralis.db');
-
+// ─── DB SETUP ───────────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS characters (
     user_id     INTEGER PRIMARY KEY,
@@ -44,23 +17,23 @@ db.exec(`
     class       TEXT,
     level       INTEGER DEFAULT 1,
     xp          INTEGER DEFAULT 0,
-    hp          INTEGER,
-    max_hp      INTEGER,
-    attack      INTEGER,
-    defense     INTEGER,
-    magic_power INTEGER,
-    speed       INTEGER,
-    magic_tokens INTEGER DEFAULT 0,
-    created_at  INTEGER DEFAULT (strftime('%s','now'))
+    hp          INTEGER DEFAULT 100,
+    max_hp      INTEGER DEFAULT 100,
+    attack      INTEGER DEFAULT 10,
+    defense     INTEGER DEFAULT 5,
+    magic       INTEGER DEFAULT 5,
+    speed       INTEGER DEFAULT 10,
+    crit        INTEGER DEFAULT 5,
+    equipped    TEXT DEFAULT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS missions (
-    user_id     INTEGER PRIMARY KEY,
-    mission_id  TEXT,
-    mission_name TEXT,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER,
     difficulty  TEXT,
-    started_at  INTEGER,
-    ends_at     INTEGER,
+    started_at  DATETIME,
+    ends_at     DATETIME,
     collected   INTEGER DEFAULT 0
   );
 
@@ -68,765 +41,505 @@ db.exec(`
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER,
     item_name   TEXT,
-    item_type   TEXT,
     rarity      TEXT,
-    stat_bonus  TEXT,
-    equipped    INTEGER DEFAULT 0
+    stat_type   TEXT,
+    stat_value  INTEGER,
+    emoji       TEXT,
+    obtained_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS burns (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER,
-    amount      INTEGER,
-    reason      TEXT,
-    burned_at   INTEGER DEFAULT (strftime('%s','now'))
+    amount      INTEGER DEFAULT 100000,
+    mission_id  INTEGER,
+    burned_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
 
-// ─── CLASSES ─────────────────────────────────────────────────────────────────
-
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const CLASSES = {
-  Warrior: {
-    emoji: '⚔️',
-    color: '#c0392b',
-    base: { hp: 120, max_hp: 120, attack: 18, defense: 14, magic_power: 4, speed: 8 },
-    description: 'Frontline fighter. High HP and attack.',
-    gear: ['Sword', 'Shield', 'Plate Armor', 'War Helmet', 'Iron Boots'],
+  warrior: {
+    emoji: '⚔️', label: 'Warrior',
+    desc: 'Frontline bruiser with high HP & Attack',
+    stats: { hp: 140, max_hp: 140, attack: 18, defense: 10, magic: 3, speed: 8, crit: 6 }
   },
-  Mage: {
-    emoji: '🔮',
-    color: '#8e44ad',
-    base: { hp: 70, max_hp: 70, attack: 8, defense: 6, magic_power: 24, speed: 12 },
-    description: 'Master of arcane arts. Devastating magic damage.',
-    gear: ['Staff', 'Robes', 'Arcane Tome', 'Mage Hood', 'Silk Boots'],
+  mage: {
+    emoji: '🔮', label: 'Mage',
+    desc: 'Burst damage specialist with high Magic',
+    stats: { hp: 80, max_hp: 80, attack: 8, defense: 4, magic: 22, speed: 12, crit: 10 }
   },
-  Archer: {
-    emoji: '🏹',
-    color: '#27ae60',
-    base: { hp: 85, max_hp: 85, attack: 16, defense: 8, magic_power: 6, speed: 18 },
-    description: 'Agile ranged striker. High speed and crit.',
-    gear: ['Bow', 'Quiver', 'Leather Armor', 'Scout Helm', 'Swift Boots'],
+  archer: {
+    emoji: '🏹', label: 'Archer',
+    desc: 'Ranged precision with Speed & Crit',
+    stats: { hp: 95, max_hp: 95, attack: 14, defense: 6, magic: 5, speed: 18, crit: 15 }
   },
-  Tank: {
-    emoji: '🛡️',
-    color: '#2980b9',
-    base: { hp: 150, max_hp: 150, attack: 10, defense: 22, magic_power: 2, speed: 5 },
-    description: 'Immovable fortress. Extreme defense and HP.',
-    gear: ['War Axe', 'Tower Shield', 'Fortress Armor', 'Titan Helm', 'Heavy Boots'],
+  tank: {
+    emoji: '🛡️', label: 'Tank',
+    desc: 'Damage absorber with Defense & HP',
+    stats: { hp: 180, max_hp: 180, attack: 10, defense: 20, magic: 2, speed: 5, crit: 3 }
   },
-  Healer: {
-    emoji: '✨',
-    color: '#f39c12',
-    base: { hp: 80, max_hp: 80, attack: 6, defense: 8, magic_power: 20, speed: 10 },
-    description: 'Divine support. Powerful heals and buffs.',
-    gear: ['Holy Staff', 'Sacred Robes', 'Blessing Tome', 'Halo Crown', 'Light Boots'],
-  },
-};
-
-// ─── ITEMS ───────────────────────────────────────────────────────────────────
-
-const RARITIES = {
-  Common:    { color: '#aaaaaa', chance: 60, emoji: '⚪' },
-  Uncommon:  { color: '#2ecc71', chance: 25, emoji: '🟢' },
-  Rare:      { color: '#3498db', chance: 10, emoji: '🔵' },
-  Epic:      { color: '#9b59b6', chance: 4,  emoji: '🟣' },
-  Legendary: { color: '#f39c12', chance: 1,  emoji: '🟡' },
-};
-
-const ITEM_POOLS = {
-  Warrior:  ['Iron Sword', 'Steel Sword', 'Runic Blade', 'Dragon Slayer', 'Aegis Shield', 'Plate Armor', 'War Helm', 'Titan Boots'],
-  Mage:     ['Oak Staff', 'Crystal Staff', 'Void Staff', 'Staff of Eternity', 'Arcane Robes', 'Mage Hood', 'Spell Tome', 'Starweave Boots'],
-  Archer:   ['Short Bow', 'Long Bow', 'Shadow Bow', 'Celestial Bow', 'Leather Vest', 'Scout Helm', 'Quiver of Winds', 'Swift Boots'],
-  Tank:     ['Iron Buckler', 'Fortress Shield', 'Aegis of Gods', 'Titan Plate', 'War Pauldrons', 'Titan Helm', 'Heavy Gauntlets', 'Earth Boots'],
-  Healer:   ['Oak Wand', 'Holy Staff', 'Staff of Light', 'Seraph Staff', 'Sacred Vestments', 'Halo Crown', 'Blessing Tome', 'Light Sandals'],
-};
-
-const ITEM_TYPES = {
-  'Sword': 'weapon', 'Staff': 'weapon', 'Bow': 'weapon', 'Shield': 'offhand',
-  'Armor': 'chest', 'Robes': 'chest', 'Vest': 'chest', 'Plate': 'chest',
-  'Helm': 'head', 'Hood': 'head', 'Crown': 'head',
-  'Boots': 'feet', 'Sandals': 'feet',
-  'Tome': 'offhand', 'Quiver': 'offhand', 'Wand': 'weapon',
-};
-
-function getItemType(name) {
-  for (const [key, type] of Object.entries(ITEM_TYPES)) {
-    if (name.includes(key)) return type;
+  healer: {
+    emoji: '✨', label: 'Healer',
+    desc: 'Divine utility with Magic & Support',
+    stats: { hp: 100, max_hp: 100, attack: 7, defense: 8, magic: 18, speed: 11, crit: 7 }
   }
-  return 'misc';
-}
+};
 
-function rollRarity(difficulty) {
-  const boosts = { quick: 0, normal: 2, hard: 6, epic: 12 };
-  const boost = boosts[difficulty] || 0;
-  const roll = Math.random() * 100;
-  let cumulative = 0;
-  const rarities = Object.entries(RARITIES);
-  for (let i = rarities.length - 1; i >= 0; i--) {
-    const [name, data] = rarities[i];
-    const adjustedChance = data.chance + (i >= 3 ? boost * (i - 2) : 0);
-    cumulative += adjustedChance;
-    if (roll <= cumulative) return name;
-  }
-  return 'Common';
-}
+const MISSIONS = {
+  quick:  { emoji: '⚡', label: 'Quick',  duration: 15 * 60,    xp: [25, 35],   difficulty: 1 },
+  normal: { emoji: '⚔️', label: 'Normal', duration: 60 * 60,    xp: [75, 100],  difficulty: 2 },
+  hard:   { emoji: '🔥', label: 'Hard',   duration: 4 * 60 * 60, xp: [230, 300], difficulty: 3 },
+  epic:   { emoji: '🌌', label: 'Epic',   duration: 12 * 60 * 60, xp: [750, 950], difficulty: 4 }
+};
 
-function rollItem(charClass, difficulty) {
-  const pool = ITEM_POOLS[charClass] || ITEM_POOLS.Warrior;
-  const item = pool[Math.floor(Math.random() * pool.length)];
-  const rarity = rollRarity(difficulty);
-  const statBonus = generateStatBonus(rarity, charClass);
-  return { name: item, type: getItemType(item), rarity, statBonus };
-}
-
-function generateStatBonus(rarity, charClass) {
-  const multipliers = { Common: 1, Uncommon: 2, Rare: 4, Epic: 7, Legendary: 12 };
-  const mult = multipliers[rarity];
-  const classStats = {
-    Warrior: { attack: mult * 2, defense: mult, hp: mult * 5 },
-    Mage:    { magic_power: mult * 3, hp: mult * 2 },
-    Archer:  { attack: mult * 2, speed: mult * 2 },
-    Tank:    { defense: mult * 3, hp: mult * 8 },
-    Healer:  { magic_power: mult * 2, hp: mult * 3 },
-  };
-  return JSON.stringify(classStats[charClass] || { attack: mult });
-}
-
-// ─── MISSIONS ────────────────────────────────────────────────────────────────
-
-const MISSIONS = [
-  // quick
-  { id: 'goblins',    name: '🗡️ Goblin Caves',        difficulty: 'quick',  xp: 30,  tokens: 500,   desc: 'Clear goblin nests in the Dark Forest.' },
-  { id: 'wolves',     name: '🐺 Feral Wolf Pack',      difficulty: 'quick',  xp: 25,  tokens: 400,   desc: 'Wolves terrorize the village. Drive them out.' },
-  // normal
-  { id: 'dungeon',    name: '🏰 Ruined Dungeon',       difficulty: 'normal', xp: 80,  tokens: 1500,  desc: 'Ancient dungeon full of undead horrors.' },
-  { id: 'bandits',    name: '⚔️ Bandit Stronghold',   difficulty: 'normal', xp: 90,  tokens: 1800,  desc: 'Take down the bandit lord and his crew.' },
-  { id: 'sea',        name: '🌊 Cursed Shipwreck',     difficulty: 'normal', xp: 85,  tokens: 1600,  desc: 'Explore a ghost ship for lost treasure.' },
-  // hard
-  { id: 'dragon',     name: '🐉 Dragon\'s Lair',      difficulty: 'hard',   xp: 250, tokens: 5000,  desc: 'Face a young dragon and claim its hoard.' },
-  { id: 'necromancer',name: '💀 Necromancer Tower',   difficulty: 'hard',   xp: 280, tokens: 5500,  desc: 'Destroy the undead master before he raises an army.' },
-  // epic
-  { id: 'titan',      name: '⚡ Titan\'s Domain',     difficulty: 'epic',   xp: 800, tokens: 18000, desc: 'Enter the realm of the Astral Titan.' },
-  { id: 'voidgate',   name: '🌌 The Void Gate',       difficulty: 'epic',   xp: 900, tokens: 20000, desc: 'Seal the Void Gate before darkness consumes Astralis.' },
+const RARITIES = [
+  { name: 'Common',    emoji: '⚪', weight: 60 },
+  { name: 'Uncommon',  emoji: '🟢', weight: 25 },
+  { name: 'Rare',      emoji: '🔵', weight: 10 },
+  { name: 'Epic',      emoji: '🟣', weight: 4  },
+  { name: 'Legendary', emoji: '🟡', weight: 1  }
 ];
 
-function getMissionsByDifficulty(diff) {
-  return MISSIONS.filter(m => m.difficulty === diff);
+const ITEM_POOLS = {
+  quick:  ['Common', 'Uncommon'],
+  normal: ['Common', 'Uncommon', 'Rare'],
+  hard:   ['Uncommon', 'Rare', 'Epic'],
+  epic:   ['Rare', 'Epic', 'Legendary']
+};
+
+const ITEM_NAMES = {
+  weapon:  ['Shadowblade', 'Voidstaff', 'Stormbow', 'Ironmaul', 'Crystalwand', 'Flamedagger', 'Soulspear', 'Frostaxe'],
+  armor:   ['Duskplate', 'Spiritweave', 'Shadowmail', 'Starforged Helm', 'Voidcloak', 'Runeshield', 'Celestial Vest'],
+  trinket: ['Amulet of Astralis', 'Chaos Orb', 'Eclipse Ring', 'Ember Shard', 'Void Crystal', 'Star Fragment', 'Dark Sigil']
+};
+
+const STAT_TYPES = ['attack', 'defense', 'magic', 'speed', 'crit', 'hp'];
+
+const MAGIC_BURN_AMOUNT = 100000;
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function xpForLevel(level) { return Math.floor(100 * Math.pow(1.4, level - 1)); }
+
+function rollRarity(pool) {
+  const available = RARITIES.filter(r => pool.includes(r.name));
+  const total = available.reduce((s, r) => s + r.weight, 0);
+  let roll = Math.random() * total;
+  for (const r of available) {
+    roll -= r.weight;
+    if (roll <= 0) return r;
+  }
+  return available[0];
 }
 
-function randomMission(difficulty) {
-  const pool = getMissionsByDifficulty(difficulty);
-  return pool[Math.floor(Math.random() * pool.length)];
+function rollItem(difficulty) {
+  const pool = ITEM_POOLS[difficulty];
+  const rarity = rollRarity(pool);
+  const type = ['weapon', 'armor', 'trinket'][Math.floor(Math.random() * 3)];
+  const names = ITEM_NAMES[type];
+  const name = names[Math.floor(Math.random() * names.length)];
+  const statType = STAT_TYPES[Math.floor(Math.random() * STAT_TYPES.length)];
+  const rarityMult = { Common: 1, Uncommon: 1.5, Rare: 2.5, Epic: 4, Legendary: 7 };
+  const statValue = Math.floor((Math.random() * 5 + 3) * rarityMult[rarity.name]);
+  return { item_name: name, rarity: rarity.name, stat_type: statType, stat_value: statValue, emoji: rarity.emoji };
 }
 
-// ─── XP / LEVELING ───────────────────────────────────────────────────────────
-
-function xpForLevel(level) {
-  return Math.floor(100 * Math.pow(level, 1.5));
+function getChar(userId) {
+  return db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
 }
 
-function checkLevelUp(userId) {
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return null;
-  let leveled = false;
-  let level = char.level;
-  let xp = char.xp;
+function levelUpCheck(char) {
+  let { level, xp } = char;
+  const msgs = [];
   while (xp >= xpForLevel(level)) {
     xp -= xpForLevel(level);
     level++;
-    leveled = true;
+    msgs.push(`\n🎉 *LEVEL UP!* You are now Level *${level}*!`);
   }
-  if (leveled) {
-    const classData = CLASSES[char.class];
-    const hpGain = char.class === 'Tank' ? 20 : char.class === 'Warrior' ? 12 : 8;
-    db.prepare(`
-      UPDATE characters SET level=?, xp=?, max_hp=max_hp+?, hp=max_hp+?,
-      attack=attack+?, defense=defense+?, magic_power=magic_power+?, speed=speed+?
-      WHERE user_id=?
-    `).run(level, xp, hpGain, hpGain,
-      Math.floor((classData.base.attack * 0.1)),
-      Math.floor((classData.base.defense * 0.1)),
-      Math.floor((classData.base.magic_power * 0.1)),
-      Math.floor((classData.base.speed * 0.1)),
-      userId);
-    return level;
+  if (msgs.length > 0) {
+    db.prepare('UPDATE characters SET level=?, xp=? WHERE user_id=?').run(level, xp, char.user_id);
   }
-  db.prepare('UPDATE characters SET xp=? WHERE user_id=?').run(xp, userId);
-  return null;
+  return msgs.join('');
 }
 
-// ─── CHARACTER CARD (Canvas) ─────────────────────────────────────────────────
-
-const CLASS_EMOJIS_ASCII = {
-  Warrior: '⚔',
-  Mage: '✦',
-  Archer: '➶',
-  Tank: '◈',
-  Healer: '✚',
-};
-
-async function generateCharacterCard(char) {
-  const W = 600, H = 360;
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-  const classData = CLASSES[char.class];
-
-  // Background
-  ctx.fillStyle = '#0d0d1a';
-  ctx.fillRect(0, 0, W, H);
-
-  // Gradient overlay
-  const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, classData.color + '33');
-  grad.addColorStop(1, '#0d0d1a');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  // Border
-  ctx.strokeStyle = classData.color;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(8, 8, W - 16, H - 16);
-
-  // Inner corner accents
-  const corners = [[8,8],[W-8,8],[8,H-8],[W-8,H-8]];
-  corners.forEach(([x, y]) => {
-    ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = classData.color;
-    ctx.fill();
-  });
-
-  // Class symbol (large background)
-  ctx.font = 'bold 140px serif';
-  ctx.fillStyle = classData.color + '18';
-  ctx.textAlign = 'right';
-  ctx.fillText(CLASS_EMOJIS_ASCII[char.class] || '◆', W - 20, H - 10);
-
-  // Username
-  ctx.font = 'bold 28px monospace';
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'left';
-  ctx.fillText(`@${char.username || 'Unknown'}`, 30, 55);
-
-  // Class badge
-  ctx.font = 'bold 14px monospace';
-  ctx.fillStyle = classData.color;
-  ctx.fillText(`${classData.emoji} ${char.class.toUpperCase()}`, 30, 80);
-
-  // Level bar label
-  ctx.font = '13px monospace';
-  ctx.fillStyle = '#aaaaaa';
-  ctx.fillText(`LVL ${char.level}`, 30, 108);
-
-  // XP bar background
-  ctx.fillStyle = '#222240';
-  ctx.fillRect(80, 95, 200, 12);
-  // XP bar fill
-  const xpPct = Math.min(char.xp / xpForLevel(char.level), 1);
-  ctx.fillStyle = classData.color;
-  ctx.fillRect(80, 95, 200 * xpPct, 12);
-  ctx.font = '10px monospace';
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(`${char.xp} / ${xpForLevel(char.level)} XP`, 82, 106);
-
-  // Divider
-  ctx.strokeStyle = classData.color + '55';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(30, 120);
-  ctx.lineTo(W - 30, 120);
-  ctx.stroke();
-
-  // Stats
-  const stats = [
-    ['❤️  HP',         `${char.hp} / ${char.max_hp}`],
-    ['⚔️  ATK',        `${char.attack}`],
-    ['🛡️  DEF',        `${char.defense}`],
-    ['🔮  MAGIC',      `${char.magic_power}`],
-    ['💨  SPEED',      `${char.speed}`],
-    ['🪙  MAGIC TKN',  `${(char.magic_tokens || 0).toLocaleString()}`],
-  ];
-
-  ctx.font = '14px monospace';
-  stats.forEach(([label, value], i) => {
-    const col = i < 3 ? 0 : 1;
-    const row = i % 3;
-    const x = 30 + col * 290;
-    const y = 150 + row * 32;
-    ctx.fillStyle = '#888899';
-    ctx.textAlign = 'left';
-    ctx.fillText(label, x, y);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'right';
-    ctx.fillText(value, x + 240, y);
-  });
-
-  // Equipped items section
-  const equipped = db.prepare(`
-    SELECT * FROM inventory WHERE user_id = ? AND equipped = 1 LIMIT 3
-  `).all(char.user_id);
-
-  if (equipped.length > 0) {
-    ctx.strokeStyle = classData.color + '33';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(30, H - 80);
-    ctx.lineTo(W - 30, H - 80);
-    ctx.stroke();
-
-    ctx.font = '11px monospace';
-    ctx.fillStyle = '#888899';
-    ctx.textAlign = 'left';
-    ctx.fillText('EQUIPPED:', 30, H - 60);
-
-    equipped.forEach((item, i) => {
-      const rarity = RARITIES[item.rarity];
-      ctx.fillStyle = rarity ? rarity.color : '#aaa';
-      ctx.fillText(`${rarity?.emoji || '⚪'} ${item.item_name}`, 30 + i * 190, H - 40);
-    });
-  }
-
-  // Watermark
-  ctx.font = '11px monospace';
-  ctx.fillStyle = classData.color + '66';
-  ctx.textAlign = 'right';
-  ctx.fillText('$MAGIC · ASTRALIS', W - 20, H - 15);
-
-  return canvas.toBuffer('image/png');
+function formatTime(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
 }
 
-// ─── BOT SETUP ───────────────────────────────────────────────────────────────
+function hpBar(current, max, length = 10) {
+  const filled = Math.round((current / max) * length);
+  return '█'.repeat(filled) + '░'.repeat(length - filled);
+}
 
-const bot = new Telegraf(BOT_TOKEN);
+function xpBar(xp, level, length = 10) {
+  const needed = xpForLevel(level);
+  const filled = Math.round((xp / needed) * length);
+  return '▓'.repeat(filled) + '░'.repeat(length - filled);
+}
 
-// ─── /start ──────────────────────────────────────────────────────────────────
-
+// ─── /start ───────────────────────────────────────────────────────────────────
 bot.start((ctx) => {
-  ctx.replyWithMarkdown(`
-✨ *Welcome to ASTRALIS* ✨
-
-The realm of eternal magic and glory awaits.
-Forge your legend. Burn your $MAGIC. Conquer the void.
-
-━━━━━━━━━━━━━━━━━━━━━
-Use */create* to forge your character.
-Already a hero? Use */profile* to see yourself.
-━━━━━━━━━━━━━━━━━━━━━
-
-⚡ *Every mission costs* \`${MAGIC_BURN_AMOUNT.toLocaleString()} $MAGIC\`
-🔥 All tokens are *burned forever.*
-  `);
+  const char = getChar(ctx.from.id);
+  const hasChar = !!char;
+  ctx.replyWithMarkdown(
+    `🌌 *Welcome to ASTRALIS*\n` +
+    `_The realm of eternal glory_\n\n` +
+    `${hasChar ? `⚔️ Welcome back, *${ctx.from.first_name}*!\n\nUse /profile to view your hero.` :
+    `A new adventure begins...\n\nUse /create to forge your hero and enter the realm.`}\n\n` +
+    `📜 Type /help for all commands.`
+  );
 });
 
-// ─── /help ───────────────────────────────────────────────────────────────────
-
+// ─── /help ────────────────────────────────────────────────────────────────────
 bot.command('help', (ctx) => {
-  ctx.replyWithMarkdown(`
-🗺️ *ASTRALIS — Command List*
-
-*/create*       → Forge your hero
-*/profile*      → View your character card
-*/mission*      → Embark on a mission
-*/collect*      → Collect mission rewards
-*/inventory*    → View your items
-*/equip* [name] → Equip an item
-*/stats*        → Detailed stat breakdown
-*/top*          → Hall of Fame leaderboard
-*/help*         → This menu
-
-━━━━━━━━━━━━━━━━━━━━━
-🔥 Missions burn \`${MAGIC_BURN_AMOUNT.toLocaleString()} $MAGIC\`
-⚔️ More features coming: Raids · Clans · PvP
-  `);
+  ctx.replyWithMarkdown(
+    `🌌 *ASTRALIS — Command Guide*\n\n` +
+    `⚔️ *Character*\n` +
+    `/create — Create your hero\n` +
+    `/profile — View character card\n` +
+    `/stats — Detailed stat breakdown\n\n` +
+    `🗺️ *Missions*\n` +
+    `/mission — Send on a mission\n` +
+    `/collect — Collect mission rewards\n\n` +
+    `🎒 *Items*\n` +
+    `/inventory — View all items\n` +
+    `/equip [name] — Equip an item\n\n` +
+    `🏆 *Social*\n` +
+    `/top — Leaderboard\n\n` +
+    `💡 Every mission burns *100,000 $MAGIC*`
+  );
 });
 
 // ─── /create ─────────────────────────────────────────────────────────────────
-
 bot.command('create', (ctx) => {
-  const userId = ctx.from.id;
-  const existing = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (existing) {
-    return ctx.reply(`You already have a character: ${CLASSES[existing.class].emoji} ${existing.class} (Lv.${existing.level})\n\nUse /profile to view it.`);
-  }
+  const existing = getChar(ctx.from.id);
+  if (existing) return ctx.replyWithMarkdown(`⚠️ You already have a *${CLASSES[existing.class].emoji} ${CLASSES[existing.class].label}*!\n\nUse /profile to view them.`);
 
-  const keyboard = Markup.inlineKeyboard([
-    [
-      Markup.button.callback('⚔️ Warrior', 'class_Warrior'),
-      Markup.button.callback('🔮 Mage', 'class_Mage'),
-    ],
-    [
-      Markup.button.callback('🏹 Archer', 'class_Archer'),
-      Markup.button.callback('🛡️ Tank', 'class_Tank'),
-    ],
-    [
-      Markup.button.callback('✨ Healer', 'class_Healer'),
-    ],
-  ]);
+  const buttons = Object.entries(CLASSES).map(([key, c]) =>
+    [Markup.button.callback(`${c.emoji} ${c.label}`, `create_class_${key}`)]
+  );
 
-  ctx.replyWithMarkdown(`
-⚔️ *Choose Your Class*
-
-*Warrior* — High HP & Attack. Frontline bruiser.
-*Mage* — Arcane power. Devastating spells.
-*Archer* — Speed & crits. Ranged precision.
-*Tank* — Fortress defense. Immovable wall.
-*Healer* — Divine support. Keeps allies alive.
-  `, keyboard);
+  ctx.replyWithMarkdown(
+    `🌌 *Choose Your Class*\n\n` +
+    Object.entries(CLASSES).map(([, c]) => `${c.emoji} *${c.label}* — ${c.desc}`).join('\n') +
+    `\n\n_Your destiny awaits..._`,
+    Markup.inlineKeyboard(buttons)
+  );
 });
 
-// Class selection callback
-Object.keys(CLASSES).forEach((className) => {
-  bot.action(`class_${className}`, (ctx) => {
-    const userId = ctx.from.id;
-    const username = ctx.from.username || ctx.from.first_name || 'Hero';
-    const classData = CLASSES[className];
+Object.keys(CLASSES).forEach(cls => {
+  bot.action(`create_class_${cls}`, (ctx) => {
+    const existing = getChar(ctx.from.id);
+    if (existing) return ctx.answerCbQuery('You already have a character!');
 
+    const c = CLASSES[cls];
+    const s = c.stats;
     db.prepare(`
-      INSERT OR IGNORE INTO characters 
-      (user_id, username, class, level, xp, hp, max_hp, attack, defense, magic_power, speed, magic_tokens)
-      VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, 0)
-    `).run(userId, username, className,
-      classData.base.hp, classData.base.max_hp,
-      classData.base.attack, classData.base.defense,
-      classData.base.magic_power, classData.base.speed);
+      INSERT INTO characters (user_id, username, class, level, xp, hp, max_hp, attack, defense, magic, speed, crit)
+      VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
+    `).run(ctx.from.id, ctx.from.username || ctx.from.first_name, cls, s.hp, s.max_hp, s.attack, s.defense, s.magic, s.speed, s.crit);
 
+    ctx.answerCbQuery(`${c.emoji} ${c.label} created!`);
     ctx.editMessageText(
-      `${classData.emoji} *${className}* chosen!\n\n${classData.description}\n\nYour legend begins.\nUse /profile to see your character card!`,
+      `🌌 *Hero Forged!*\n\n` +
+      `${c.emoji} *${c.label}* — ${c.desc}\n\n` +
+      `❤️ HP: ${s.hp}/${s.max_hp}\n` +
+      `⚔️ ATK: ${s.attack}  🛡️ DEF: ${s.defense}\n` +
+      `🔮 MAG: ${s.magic}  💨 SPD: ${s.speed}  🎯 CRIT: ${s.crit}%\n\n` +
+      `_Your journey has begun. Use /mission to embark!_`,
       { parse_mode: 'Markdown' }
     );
   });
 });
 
-// ─── /profile ────────────────────────────────────────────────────────────────
+// ─── /profile ─────────────────────────────────────────────────────────────────
+bot.command('profile', (ctx) => {
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.replyWithMarkdown(`❌ No hero found. Use /create to begin.`);
 
-bot.command('profile', async (ctx) => {
-  const userId = ctx.from.id;
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return ctx.reply('No character found. Use /create to forge your hero.');
-
-  try {
-    const imgBuffer = await generateCharacterCard(char);
-    await ctx.replyWithPhoto({ source: imgBuffer }, {
-      caption: `${CLASSES[char.class].emoji} *${char.username}* · Lv.${char.level} ${char.class}\n💰 ${(char.magic_tokens || 0).toLocaleString()} $MAGIC earned`,
-      parse_mode: 'Markdown',
-    });
-  } catch (err) {
-    console.error('Card gen error:', err);
-    ctx.reply('Error generating character card. Try /stats instead.');
-  }
-});
-
-// ─── /stats ──────────────────────────────────────────────────────────────────
-
-bot.command('stats', (ctx) => {
-  const userId = ctx.from.id;
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return ctx.reply('No character. Use /create first.');
-
-  const classData = CLASSES[char.class];
+  const c = CLASSES[char.class];
   const xpNeeded = xpForLevel(char.level);
-  const equipped = db.prepare('SELECT * FROM inventory WHERE user_id = ? AND equipped = 1').all(userId);
+  const equipped = char.equipped
+    ? db.prepare('SELECT * FROM inventory WHERE id = ?').get(char.equipped)
+    : null;
 
-  let equippedText = equipped.length
-    ? equipped.map(i => `  ${RARITIES[i.rarity]?.emoji || '⚪'} ${i.item_name} (${i.rarity})`).join('\n')
-    : '  None equipped';
+  const activeMission = db.prepare(
+    'SELECT * FROM missions WHERE user_id = ? AND collected = 0 ORDER BY id DESC LIMIT 1'
+  ).get(ctx.from.id);
 
-  ctx.replyWithMarkdown(`
-${classData.emoji} *${char.username}* — Lv.${char.level} ${char.class}
-
-❤️ HP:        ${char.hp} / ${char.max_hp}
-⚔️ Attack:    ${char.attack}
-🛡️ Defense:   ${char.defense}
-🔮 Magic:     ${char.magic_power}
-💨 Speed:     ${char.speed}
-
-📊 XP: ${char.xp} / ${xpNeeded}
-🔥 $MAGIC Earned: ${(char.magic_tokens || 0).toLocaleString()}
-
-🎽 *Equipped:*
-${equippedText}
-  `);
-});
-
-// ─── /mission ────────────────────────────────────────────────────────────────
-
-bot.command('mission', (ctx) => {
-  const userId = ctx.from.id;
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return ctx.reply('No character. Use /create first.');
-
-  const active = db.prepare('SELECT * FROM missions WHERE user_id = ? AND collected = 0').get(userId);
-  if (active) {
-    const remaining = active.ends_at - Math.floor(Date.now() / 1000);
-    if (remaining > 0) {
-      const mins = Math.floor(remaining / 60);
-      const secs = remaining % 60;
-      return ctx.reply(`⏳ You're already on a mission: *${active.mission_name}*\n\nReturns in: ${mins}m ${secs}s\n\nUse /collect when ready!`, { parse_mode: 'Markdown' });
+  let missionStatus = '🏕️ Resting';
+  if (activeMission) {
+    const now = Date.now() / 1000;
+    const endsAt = new Date(activeMission.ends_at).getTime() / 1000;
+    if (now < endsAt) {
+      missionStatus = `${MISSIONS[activeMission.difficulty].emoji} On Mission (${formatTime(Math.ceil(endsAt - now))} left)`;
+    } else {
+      missionStatus = `✅ Mission Complete — /collect`;
     }
-    return ctx.reply(`✅ Mission complete! Use /collect to claim your rewards.`);
   }
 
-  const keyboard = Markup.inlineKeyboard([
-    [
-      Markup.button.callback('⚡ Quick (15min)', 'mission_quick'),
-      Markup.button.callback('⚔️ Normal (1hr)', 'mission_normal'),
-    ],
-    [
-      Markup.button.callback('🔥 Hard (4hrs)', 'mission_hard'),
-      Markup.button.callback('🌌 Epic (12hrs)', 'mission_epic'),
-    ],
-  ]);
-
-  ctx.replyWithMarkdown(`
-⚔️ *Choose Mission Difficulty*
-
-Each mission costs *${MAGIC_BURN_AMOUNT.toLocaleString()} $MAGIC* (burned 🔥)
-
-⚡ *Quick* — 15 min · ~30 XP · chance: Common gear
-⚔️ *Normal* — 1 hr  · ~85 XP · chance: Uncommon gear  
-🔥 *Hard* — 4 hrs · ~265 XP · chance: Rare gear
-🌌 *Epic* — 12 hrs · ~850 XP · chance: Epic/Legendary gear
-  `, keyboard);
+  ctx.replyWithMarkdown(
+    `╔══════════════════════╗\n` +
+    `  🌌 *ASTRALIS HERO CARD*\n` +
+    `╚══════════════════════╝\n\n` +
+    `${c.emoji} *${char.username || 'Hero'}* — ${c.label}\n` +
+    `⭐ Level *${char.level}*  |  🆔 ${ctx.from.id}\n\n` +
+    `❤️ HP  [${hpBar(char.hp, char.max_hp)}] ${char.hp}/${char.max_hp}\n` +
+    `✨ XP  [${xpBar(char.xp, char.level)}] ${char.xp}/${xpNeeded}\n\n` +
+    `⚔️ ATK *${char.attack}*   🛡️ DEF *${char.defense}*\n` +
+    `🔮 MAG *${char.magic}*   💨 SPD *${char.speed}*   🎯 CRIT *${char.crit}%*\n\n` +
+    `🧤 Equipped: ${equipped ? `${equipped.emoji} ${equipped.item_name} (+${equipped.stat_value} ${equipped.stat_type})` : 'None'}\n` +
+    `🗺️ Status: ${missionStatus}`
+  );
 });
 
-// Mission difficulty callbacks
-['quick', 'normal', 'hard', 'epic'].forEach((diff) => {
-  bot.action(`mission_${diff}`, (ctx) => {
-    const userId = ctx.from.id;
-    const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-    if (!char) return ctx.answerCbQuery('No character found.');
+// ─── /stats ───────────────────────────────────────────────────────────────────
+bot.command('stats', (ctx) => {
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
 
-    const active = db.prepare('SELECT * FROM missions WHERE user_id = ? AND collected = 0').get(userId);
-    if (active) {
-      const remaining = active.ends_at - Math.floor(Date.now() / 1000);
-      if (remaining > 0) return ctx.answerCbQuery(`Still on a mission! Returns in ${Math.ceil(remaining/60)}min`);
+  const c = CLASSES[char.class];
+  const itemCount = db.prepare('SELECT COUNT(*) as c FROM inventory WHERE user_id = ?').get(ctx.from.id).c;
+  const missionCount = db.prepare('SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND collected = 1').get(ctx.from.id).c;
+  const burnCount = db.prepare('SELECT COUNT(*) as c FROM burns WHERE user_id = ?').get(ctx.from.id).c;
+
+  ctx.replyWithMarkdown(
+    `📊 *${c.emoji} ${char.username} — Stats Breakdown*\n\n` +
+    `🎖️ *Level ${char.level}* — ${char.xp}/${xpForLevel(char.level)} XP to next level\n\n` +
+    `*Base Stats:*\n` +
+    `❤️  HP:      ${char.hp} / ${char.max_hp}\n` +
+    `⚔️  Attack:  ${char.attack}\n` +
+    `🛡️  Defense: ${char.defense}\n` +
+    `🔮  Magic:   ${char.magic}\n` +
+    `💨  Speed:   ${char.speed}\n` +
+    `🎯  Crit:    ${char.crit}%\n\n` +
+    `*Career:*\n` +
+    `📦 Items collected: ${itemCount}\n` +
+    `🗺️ Missions done: ${missionCount}\n` +
+    `🔥 $MAGIC burned: ${(burnCount * MAGIC_BURN_AMOUNT).toLocaleString()}`
+  );
+});
+
+// ─── /mission ─────────────────────────────────────────────────────────────────
+bot.command('mission', (ctx) => {
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
+
+  const activeMission = db.prepare(
+    'SELECT * FROM missions WHERE user_id = ? AND collected = 0 ORDER BY id DESC LIMIT 1'
+  ).get(ctx.from.id);
+
+  if (activeMission) {
+    const now = Date.now() / 1000;
+    const endsAt = new Date(activeMission.ends_at).getTime() / 1000;
+    if (now < endsAt) {
+      return ctx.replyWithMarkdown(
+        `⚠️ *Already on a mission!*\n\n` +
+        `${MISSIONS[activeMission.difficulty].emoji} *${MISSIONS[activeMission.difficulty].label}* mission in progress.\n` +
+        `⏳ Returns in: *${formatTime(Math.ceil(endsAt - now))}*\n\n` +
+        `_Use /collect once it completes._`
+      );
+    } else {
+      return ctx.replyWithMarkdown(`✅ Your mission is complete! Use /collect to claim your rewards.`);
     }
+  }
 
-    const mission = randomMission(diff);
-    const now = Math.floor(Date.now() / 1000);
-    const ends = now + MISSION_DURATIONS[diff];
+  const buttons = Object.entries(MISSIONS).map(([key, m]) =>
+    [Markup.button.callback(`${m.emoji} ${m.label} (${formatTime(m.duration)}) — ${m.xp[0]}-${m.xp[1]} XP`, `mission_start_${key}`)]
+  );
 
-    db.prepare(`
-      INSERT OR REPLACE INTO missions (user_id, mission_id, mission_name, difficulty, started_at, ends_at, collected)
-      VALUES (?, ?, ?, ?, ?, ?, 0)
-    `).run(userId, mission.id, mission.name, diff, now, ends);
+  ctx.replyWithMarkdown(
+    `🗺️ *Choose a Mission*\n\n` +
+    Object.entries(MISSIONS).map(([, m]) =>
+      `${m.emoji} *${m.label}* — ${formatTime(m.duration)} | ${m.xp[0]}–${m.xp[1]} XP`
+    ).join('\n') +
+    `\n\n🔥 All missions burn *100,000 $MAGIC*\n_Choose wisely, hero._`,
+    Markup.inlineKeyboard(buttons)
+  );
+});
 
-    // Log the burn (in production, verify on-chain)
-    db.prepare('INSERT INTO burns (user_id, amount, reason) VALUES (?, ?, ?)').run(
-      userId, MAGIC_BURN_AMOUNT, `Mission: ${mission.name}`
-    );
+Object.keys(MISSIONS).forEach(diff => {
+  bot.action(`mission_start_${diff}`, (ctx) => {
+    const char = getChar(ctx.from.id);
+    if (!char) return ctx.answerCbQuery('No character found!');
 
-    const durationStr = { quick: '15 minutes', normal: '1 hour', hard: '4 hours', epic: '12 hours' }[diff];
+    const activeMission = db.prepare(
+      'SELECT * FROM missions WHERE user_id = ? AND collected = 0 ORDER BY id DESC LIMIT 1'
+    ).get(ctx.from.id);
 
+    if (activeMission) return ctx.answerCbQuery('Already on a mission!');
+
+    const m = MISSIONS[diff];
+    const now = new Date();
+    const endsAt = new Date(now.getTime() + m.duration * 1000);
+
+    const missionResult = db.prepare(
+      'INSERT INTO missions (user_id, difficulty, started_at, ends_at) VALUES (?, ?, ?, ?)'
+    ).run(ctx.from.id, diff, now.toISOString(), endsAt.toISOString());
+
+    db.prepare('INSERT INTO burns (user_id, amount, mission_id) VALUES (?, ?, ?)')
+      .run(ctx.from.id, MAGIC_BURN_AMOUNT, missionResult.lastInsertRowid);
+
+    ctx.answerCbQuery(`${m.emoji} Mission started!`);
     ctx.editMessageText(
-      `🔥 *${MAGIC_BURN_AMOUNT.toLocaleString()} $MAGIC BURNED*\n\n` +
-      `${mission.name}\n\n` +
-      `"${mission.desc}"\n\n` +
-      `⏳ Duration: ${durationStr}\n` +
-      `💰 Est. reward: ~${mission.tokens.toLocaleString()} $MAGIC + items\n\n` +
-      `Use /collect when the mission ends!`,
+      `🌌 *Mission Started!*\n\n` +
+      `${m.emoji} *${m.label}* difficulty\n` +
+      `⏳ Duration: *${formatTime(m.duration)}*\n` +
+      `✨ XP reward: *${m.xp[0]}–${m.xp[1]}*\n` +
+      `🔥 Burned: *${MAGIC_BURN_AMOUNT.toLocaleString()} $MAGIC*\n\n` +
+      `Your hero ventures into the realm...\n` +
+      `_Use /collect when the mission ends._`,
       { parse_mode: 'Markdown' }
     );
   });
 });
 
-// ─── /collect ────────────────────────────────────────────────────────────────
+// ─── /collect ─────────────────────────────────────────────────────────────────
+bot.command('collect', (ctx) => {
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
 
-bot.command('collect', async (ctx) => {
-  const userId = ctx.from.id;
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return ctx.reply('No character. Use /create first.');
+  const mission = db.prepare(
+    'SELECT * FROM missions WHERE user_id = ? AND collected = 0 ORDER BY id DESC LIMIT 1'
+  ).get(ctx.from.id);
 
-  const mission = db.prepare('SELECT * FROM missions WHERE user_id = ? AND collected = 0').get(userId);
-  if (!mission) return ctx.reply('No active mission. Use /mission to embark!');
+  if (!mission) return ctx.replyWithMarkdown('🏕️ No active mission. Use /mission to embark!');
 
-  const now = Math.floor(Date.now() / 1000);
-  if (now < mission.ends_at) {
-    const remaining = mission.ends_at - now;
-    const mins = Math.floor(remaining / 60);
-    const secs = remaining % 60;
-    return ctx.reply(`⏳ Not yet! Mission ends in ${mins}m ${secs}s`);
+  const now = Date.now() / 1000;
+  const endsAt = new Date(mission.ends_at).getTime() / 1000;
+
+  if (now < endsAt) {
+    return ctx.replyWithMarkdown(
+      `⏳ Mission still in progress!\n\n` +
+      `Returns in: *${formatTime(Math.ceil(endsAt - now))}*`
+    );
   }
 
-  // Mark collected
-  db.prepare('UPDATE missions SET collected = 1 WHERE user_id = ?').run(userId);
+  // Grant XP
+  const m = MISSIONS[mission.difficulty];
+  const xpGained = Math.floor(Math.random() * (m.xp[1] - m.xp[0] + 1)) + m.xp[0];
+  const newXp = char.xp + xpGained;
+  db.prepare('UPDATE characters SET xp = ? WHERE user_id = ?').run(newXp, ctx.from.id);
 
-  // Get mission data
-  const missionData = MISSIONS.find(m => m.id === mission.mission_id) || 
-    { xp: 50, tokens: 1000, name: mission.mission_name };
+  const updatedChar = getChar(ctx.from.id);
+  const lvlUpMsg = levelUpCheck(updatedChar);
 
-  // XP reward (±20% variance)
-  const xpGain = Math.floor(missionData.xp * (0.8 + Math.random() * 0.4));
-  const tokenGain = Math.floor(missionData.tokens * (0.8 + Math.random() * 0.4));
+  // Roll item (70% chance)
+  let itemMsg = '🎒 No item drop this time.';
+  if (Math.random() < 0.7) {
+    const item = rollItem(mission.difficulty);
+    db.prepare(
+      'INSERT INTO inventory (user_id, item_name, rarity, stat_type, stat_value, emoji) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(ctx.from.id, item.item_name, item.rarity, item.stat_type, item.stat_value, item.emoji);
+    itemMsg = `${item.emoji} *${item.rarity}* drop: *${item.item_name}* (+${item.stat_value} ${item.stat_type})`;
+  }
 
-  // Update XP + tokens
-  db.prepare('UPDATE characters SET xp = xp + ?, magic_tokens = magic_tokens + ? WHERE user_id = ?')
-    .run(xpGain, tokenGain, userId);
+  db.prepare('UPDATE missions SET collected = 1 WHERE id = ?').run(mission.id);
 
-  // Roll item drop (70% chance)
-  let itemText = '📦 No item dropped this time.';
-  let droppedItem = null;
-  if (Math.random() < 0.70) {
-    droppedItem = rollItem(char.class, mission.difficulty);
-    db.prepare(`
-      INSERT INTO inventory (user_id, item_name, item_type, rarity, stat_bonus)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(userId, droppedItem.name, droppedItem.type, droppedItem.rarity, droppedItem.statBonus);
+  ctx.replyWithMarkdown(
+    `✅ *Mission Complete!*\n\n` +
+    `${m.emoji} *${m.label}* mission finished!\n\n` +
+    `✨ XP gained: *+${xpGained}*\n` +
+    `${itemMsg}` +
+    `${lvlUpMsg}\n\n` +
+    `_Use /profile to view your hero._`
+  );
+});
 
-    const rarityData = RARITIES[droppedItem.rarity];
-    itemText = `${rarityData.emoji} *${droppedItem.rarity}* drop: *${droppedItem.name}*!`;
-    if (droppedItem.rarity === 'Epic' || droppedItem.rarity === 'Legendary') {
-      itemText = `🎉🎉 ${itemText} 🎉🎉`;
+// ─── /inventory ───────────────────────────────────────────────────────────────
+bot.command('inventory', (ctx) => {
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
+
+  const items = db.prepare('SELECT * FROM inventory WHERE user_id = ? ORDER BY obtained_at DESC').all(ctx.from.id);
+
+  if (!items.length) return ctx.replyWithMarkdown('🎒 *Inventory empty!*\n\nComplete missions to earn items.');
+
+  const rarityOrder = { Legendary: 0, Epic: 1, Rare: 2, Uncommon: 3, Common: 4 };
+  items.sort((a, b) => rarityOrder[a.rarity] - rarityOrder[b.rarity]);
+
+  const lines = items.map(it =>
+    `${it.emoji} *${it.item_name}* [${it.rarity}]\n   +${it.stat_value} ${it.stat_type}${char.equipped == it.id ? ' ✅ *Equipped*' : ''}`
+  );
+
+  const pages = [];
+  for (let i = 0; i < lines.length; i += 10) {
+    pages.push(lines.slice(i, i + 10).join('\n'));
+  }
+
+  ctx.replyWithMarkdown(`🎒 *Inventory* (${items.length} items)\n\n${pages[0]}\n\n_Use /equip [item name] to equip._`);
+});
+
+// ─── /equip ───────────────────────────────────────────────────────────────────
+bot.command('equip', (ctx) => {
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
+
+  const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!args) return ctx.replyWithMarkdown('Usage: /equip [item name]\n\nExample: /equip Shadowblade');
+
+  const items = db.prepare('SELECT * FROM inventory WHERE user_id = ?').all(ctx.from.id);
+  const item = items.find(it => it.item_name.toLowerCase().includes(args.toLowerCase()));
+
+  if (!item) return ctx.replyWithMarkdown(`❌ Item "*${args}*" not found in your inventory.\n\nUse /inventory to see your items.`);
+
+  // Remove old equipped stat bonus
+  if (char.equipped) {
+    const old = db.prepare('SELECT * FROM inventory WHERE id = ?').get(char.equipped);
+    if (old) {
+      const stat = old.stat_type;
+      const val = old.stat_value;
+      if (STAT_TYPES.includes(stat)) {
+        db.prepare(`UPDATE characters SET ${stat} = MAX(0, ${stat} - ?) WHERE user_id = ?`).run(val, ctx.from.id);
+      }
     }
   }
 
-  // Level up check
-  const newLevel = checkLevelUp(userId);
-  const levelText = newLevel ? `\n\n🆙 *LEVEL UP! You are now Level ${newLevel}!* 🆙` : '';
-
-  const updatedChar = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-
-  ctx.replyWithMarkdown(`
-✅ *Mission Complete!*
-${mission.mission_name}
-
-━━━━━━━━━━━━━━━━━━
-✨ XP Gained:    +${xpGain}
-🪙 $MAGIC:       +${tokenGain.toLocaleString()}
-
-${itemText}
-━━━━━━━━━━━━━━━━━━
-📊 Total XP: ${updatedChar.xp} / ${xpForLevel(updatedChar.level)}
-🔥 Total $MAGIC earned: ${(updatedChar.magic_tokens || 0).toLocaleString()}${levelText}
-
-Use /mission to embark again!
-Use /inventory to see your items.
-  `);
-
-  // Send updated character card after level up
-  if (newLevel) {
-    try {
-      const imgBuffer = await generateCharacterCard(updatedChar);
-      await ctx.replyWithPhoto({ source: imgBuffer }, {
-        caption: `🆙 Level ${newLevel} ${CLASSES[updatedChar.class].emoji} ${updatedChar.class}!`,
-        parse_mode: 'Markdown',
-      });
-    } catch (e) { /* silent */ }
-  }
-});
-
-// ─── /inventory ──────────────────────────────────────────────────────────────
-
-bot.command('inventory', (ctx) => {
-  const userId = ctx.from.id;
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return ctx.reply('No character. Use /create first.');
-
-  const items = db.prepare('SELECT * FROM inventory WHERE user_id = ? ORDER BY rarity DESC, id DESC LIMIT 30').all(userId);
-  if (!items.length) return ctx.reply('📦 Inventory empty. Go on a mission to earn items!');
-
-  const grouped = {};
-  items.forEach(item => {
-    const key = item.rarity;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(item);
-  });
-
-  const rarityOrder = ['Legendary', 'Epic', 'Rare', 'Uncommon', 'Common'];
-  let text = `🎒 *${char.username}'s Inventory* (${items.length} items)\n\n`;
-
-  rarityOrder.forEach(rarity => {
-    if (!grouped[rarity]) return;
-    const r = RARITIES[rarity];
-    text += `${r.emoji} *${rarity}*\n`;
-    grouped[rarity].forEach(item => {
-      const eq = item.equipped ? ' ✅' : '';
-      text += `  • ${item.item_name} [${item.item_type}]${eq}\n`;
-    });
-    text += '\n';
-  });
-
-  text += `\nUse /equip [item name] to equip an item.`;
-  ctx.replyWithMarkdown(text);
-});
-
-// ─── /equip ──────────────────────────────────────────────────────────────────
-
-bot.command('equip', (ctx) => {
-  const userId = ctx.from.id;
-  const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!args) return ctx.reply('Usage: /equip [item name]\nExample: /equip Iron Sword');
-
-  const char = db.prepare('SELECT * FROM characters WHERE user_id = ?').get(userId);
-  if (!char) return ctx.reply('No character. Use /create first.');
-
-  // Find item in inventory (case-insensitive)
-  const item = db.prepare(`
-    SELECT * FROM inventory WHERE user_id = ? AND LOWER(item_name) LIKE LOWER(?) LIMIT 1
-  `).get(userId, `%${args}%`);
-
-  if (!item) return ctx.reply(`Item "${args}" not found in your inventory. Check /inventory.`);
-  if (item.equipped) return ctx.reply(`${item.item_name} is already equipped!`);
-
-  // Unequip same slot
-  db.prepare('UPDATE inventory SET equipped = 0 WHERE user_id = ? AND item_type = ?').run(userId, item.item_type);
-
-  // Equip new item
-  db.prepare('UPDATE inventory SET equipped = 1 WHERE id = ?').run(item.id);
-
-  // Apply stat bonus
-  const bonus = JSON.parse(item.stat_bonus || '{}');
-  const updates = Object.entries(bonus).map(([stat, val]) => `${stat} = ${stat} + ${val}`).join(', ');
-  if (updates) {
-    db.prepare(`UPDATE characters SET ${updates} WHERE user_id = ?`).run(userId);
+  // Apply new item stat
+  const stat = item.stat_type;
+  if (STAT_TYPES.includes(stat)) {
+    db.prepare(`UPDATE characters SET ${stat} = ${stat} + ? WHERE user_id = ?`).run(item.stat_value, ctx.from.id);
   }
 
-  const rarityData = RARITIES[item.rarity];
-  ctx.replyWithMarkdown(`
-${rarityData.emoji} *${item.item_name}* equipped! (${item.rarity})
+  db.prepare('UPDATE characters SET equipped = ? WHERE user_id = ?').run(item.id, ctx.from.id);
 
-Stats gained: ${Object.entries(bonus).map(([k,v]) => `+${v} ${k}`).join(', ') || 'none'}
-
-Use /profile to see your updated character card.
-  `);
+  ctx.replyWithMarkdown(
+    `✅ *Equipped!*\n\n` +
+    `${item.emoji} *${item.item_name}* [${item.rarity}]\n` +
+    `📈 +${item.stat_value} *${item.stat_type}* applied to your stats.\n\n` +
+    `_Use /profile to see updated stats._`
+  );
 });
 
-// ─── /top ────────────────────────────────────────────────────────────────────
-
+// ─── /top ─────────────────────────────────────────────────────────────────────
 bot.command('top', (ctx) => {
-  const leaders = db.prepare(`
-    SELECT username, class, level, xp, magic_tokens
-    FROM characters ORDER BY level DESC, xp DESC LIMIT 10
-  `).all();
+  const heroes = db.prepare(
+    'SELECT * FROM characters ORDER BY level DESC, xp DESC LIMIT 10'
+  ).all();
 
-  if (!leaders.length) return ctx.reply('No heroes yet. Be the first!');
+  if (!heroes.length) return ctx.replyWithMarkdown('🏆 No heroes yet. Be the first!');
 
   const medals = ['🥇', '🥈', '🥉'];
-  let text = `🏆 *ASTRALIS — Hall of Fame*\n\n`;
-
-  leaders.forEach((h, i) => {
-    const medal = medals[i] || `${i + 1}.`;
-    const classData = CLASSES[h.class];
-    text += `${medal} ${classData?.emoji || ''} *${h.username}* — Lv.${h.level} ${h.class}\n`;
-    text += `    🔥 ${(h.magic_tokens || 0).toLocaleString()} $MAGIC earned\n\n`;
+  const lines = heroes.map((h, i) => {
+    const c = CLASSES[h.class];
+    const medal = medals[i] || `*${i + 1}.*`;
+    return `${medal} ${c.emoji} *${h.username || 'Hero'}* — Lvl *${h.level}* ${c.label}`;
   });
 
-  text += `\n$MAGIC · ASTRALIS`;
-  ctx.replyWithMarkdown(text);
+  ctx.replyWithMarkdown(
+    `🏆 *ASTRALIS Leaderboard*\n\n` +
+    lines.join('\n') +
+    `\n\n_Rise through the ranks, hero._`
+  );
 });
 
-// ─── ERROR HANDLER ───────────────────────────────────────────────────────────
-
-bot.catch((err, ctx) => {
-  console.error('Bot error:', err);
-  ctx.reply('⚡ An error occurred. Try again!').catch(() => {});
-});
-
-// ─── LAUNCH ──────────────────────────────────────────────────────────────────
-
-bot.launch().then(() => {
-  console.log('🌌 ASTRALIS RPG Bot is live!');
-});
+// ─── LAUNCH ───────────────────────────────────────────────────────────────────
+console.log('🌌 ASTRALIS RPG Bot starting...');
+bot.launch().then(() => console.log('✅ Bot is live!'));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
