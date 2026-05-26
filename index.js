@@ -87,9 +87,9 @@ const CLASSES = {
 };
 
 const MISSIONS = {
-  quick:  { emoji: '⚡', label: 'Quick',  duration: 15 * 60,    xp: [25, 35],   difficulty: 1 },
-  normal: { emoji: '⚔️', label: 'Normal', duration: 60 * 60,    xp: [75, 100],  difficulty: 2 },
-  hard:   { emoji: '🔥', label: 'Hard',   duration: 4 * 60 * 60, xp: [230, 300], difficulty: 3 },
+  quick:  { emoji: '⚡', label: 'Quick',  duration: 15 * 60,     xp: [25, 35],   difficulty: 1 },
+  normal: { emoji: '⚔️', label: 'Normal', duration: 60 * 60,     xp: [75, 100],  difficulty: 2 },
+  hard:   { emoji: '🔥', label: 'Hard',   duration: 4 * 60 * 60,  xp: [230, 300], difficulty: 3 },
   epic:   { emoji: '🌌', label: 'Epic',   duration: 12 * 60 * 60, xp: [750, 950], difficulty: 4 }
 };
 
@@ -117,6 +117,19 @@ const ITEM_NAMES = {
 const STAT_TYPES = ['attack', 'defense', 'magic', 'speed', 'crit', 'hp'];
 
 const MAGIC_BURN_AMOUNT = 100000;
+
+// ─── CLASS ARTWORK URLs ───────────────────────────────────────────────────────
+// These are public fantasy art images — swap for your own if desired.
+// Using Lexica / stable diffusion style public images via direct URL.
+const CLASS_IMAGES = {
+  warrior: 'https://images.unsplash.com/photo-1624138784614-87fd1b6528f8?w=600',
+  mage:    'https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=600',
+  archer:  'https://images.unsplash.com/photo-1519074069444-1ba4fff66d16?w=600',
+  tank:    'https://images.unsplash.com/photo-1562564055-71e051d33c19?w=600',
+  healer:  'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=600',
+  // Generic realm splash for /start
+  realm:   'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=600'
+};
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function xpForLevel(level) { return Math.floor(100 * Math.pow(1.4, level - 1)); }
@@ -182,15 +195,24 @@ function xpBar(xp, level, length = 10) {
 }
 
 // ─── /start ───────────────────────────────────────────────────────────────────
-bot.start((ctx) => {
+bot.start(async (ctx) => {
   const char = getChar(ctx.from.id);
   const hasChar = !!char;
-  ctx.replyWithMarkdown(
-    `🌌 *Welcome to ASTRALIS*\n` +
-    `_The realm of eternal glory_\n\n` +
-    `${hasChar ? `⚔️ Welcome back, *${ctx.from.first_name}*!\n\nUse /profile to view your hero.` :
-    `A new adventure begins...\n\nUse /create to forge your hero and enter the realm.`}\n\n` +
-    `📜 Type /help for all commands.`
+
+  // Send atmospheric realm image first
+  await ctx.replyWithPhoto(
+    { url: 'https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=800' },
+    {
+      caption:
+        `🌌 *Welcome to ASTRALIS*\n` +
+        `_The realm of eternal glory_\n\n` +
+        `${hasChar
+          ? `⚔️ Welcome back, *${ctx.from.first_name}*!\n\nUse /profile to view your hero.`
+          : `A new adventure begins...\n\nUse /create to forge your hero and enter the realm.`
+        }\n\n` +
+        `📜 Type /help for all commands.`,
+      parse_mode: 'Markdown'
+    }
   );
 });
 
@@ -206,8 +228,7 @@ bot.command('help', (ctx) => {
     `/mission — Send on a mission\n` +
     `/collect — Collect mission rewards\n\n` +
     `🎒 *Items*\n` +
-    `/inventory — View all items\n` +
-    `/equip [name] — Equip an item\n\n` +
+    `/inventory — View & equip all items\n\n` +
     `🏆 *Social*\n` +
     `/top — Leaderboard\n\n` +
     `💡 Every mission burns *100,000 $MAGIC*`
@@ -215,24 +236,34 @@ bot.command('help', (ctx) => {
 });
 
 // ─── /create ─────────────────────────────────────────────────────────────────
-bot.command('create', (ctx) => {
+bot.command('create', async (ctx) => {
   const existing = getChar(ctx.from.id);
-  if (existing) return ctx.replyWithMarkdown(`⚠️ You already have a *${CLASSES[existing.class].emoji} ${CLASSES[existing.class].label}*!\n\nUse /profile to view them.`);
+  if (existing) {
+    return ctx.replyWithMarkdown(
+      `⚠️ You already have a *${CLASSES[existing.class].emoji} ${CLASSES[existing.class].label}*!\n\nUse /profile to view them.`
+    );
+  }
 
   const buttons = Object.entries(CLASSES).map(([key, c]) =>
     [Markup.button.callback(`${c.emoji} ${c.label}`, `create_class_${key}`)]
   );
 
-  ctx.replyWithMarkdown(
-    `🌌 *Choose Your Class*\n\n` +
-    Object.entries(CLASSES).map(([, c]) => `${c.emoji} *${c.label}* — ${c.desc}`).join('\n') +
-    `\n\n_Your destiny awaits..._`,
-    Markup.inlineKeyboard(buttons)
+  // Show warrior art to spark the fantasy
+  await ctx.replyWithPhoto(
+    { url: 'https://images.unsplash.com/photo-1623091411395-09e79fdbfcf5?w=800' },
+    {
+      caption:
+        `🌌 *Choose Your Class*\n\n` +
+        Object.entries(CLASSES).map(([, c]) => `${c.emoji} *${c.label}* — ${c.desc}`).join('\n') +
+        `\n\n_Your destiny awaits..._`,
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(buttons)
+    }
   );
 });
 
 Object.keys(CLASSES).forEach(cls => {
-  bot.action(`create_class_${cls}`, (ctx) => {
+  bot.action(`create_class_${cls}`, async (ctx) => {
     const existing = getChar(ctx.from.id);
     if (existing) return ctx.answerCbQuery('You already have a character!');
 
@@ -243,8 +274,10 @@ Object.keys(CLASSES).forEach(cls => {
       VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
     `).run(ctx.from.id, ctx.from.username || ctx.from.first_name, cls, s.hp, s.max_hp, s.attack, s.defense, s.magic, s.speed, s.crit);
 
-    ctx.answerCbQuery(`${c.emoji} ${c.label} created!`);
-    ctx.editMessageText(
+    await ctx.answerCbQuery(`${c.emoji} ${c.label} created!`);
+
+    // Edit the caption on the class-select photo message
+    await ctx.editMessageCaption(
       `🌌 *Hero Forged!*\n\n` +
       `${c.emoji} *${c.label}* — ${c.desc}\n\n` +
       `❤️ HP: ${s.hp}/${s.max_hp}\n` +
@@ -252,6 +285,15 @@ Object.keys(CLASSES).forEach(cls => {
       `🔮 MAG: ${s.magic}  💨 SPD: ${s.speed}  🎯 CRIT: ${s.crit}%\n\n` +
       `_Your journey has begun. Use /mission to embark!_`,
       { parse_mode: 'Markdown' }
+    );
+
+    // Send the class-specific hero image
+    await ctx.replyWithPhoto(
+      { url: CLASS_IMAGES[cls] || CLASS_IMAGES.warrior },
+      {
+        caption: `${c.emoji} *Your ${c.label} awakens...*\n_The realm trembles at your arrival._`,
+        parse_mode: 'Markdown'
+      }
     );
   });
 });
@@ -446,73 +488,141 @@ bot.command('collect', (ctx) => {
     `✨ XP gained: *+${xpGained}*\n` +
     `${itemMsg}` +
     `${lvlUpMsg}\n\n` +
-    `_Use /profile to view your hero._`
+    `_Use /inventory to manage your loot._`
   );
 });
 
 // ─── /inventory ───────────────────────────────────────────────────────────────
+// Shows a visual bag with inline [Equip] buttons per item — no typing needed.
+
+const ITEMS_PER_PAGE = 5;
+
+function buildInventoryMessage(char, items, page) {
+  const rarityOrder = { Legendary: 0, Epic: 1, Rare: 2, Uncommon: 3, Common: 4 };
+  const sorted = [...items].sort((a, b) => rarityOrder[a.rarity] - rarityOrder[b.rarity]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / ITEMS_PER_PAGE));
+  const pageItems = sorted.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
+
+  const lines = pageItems.map(it => {
+    const isEquipped = char.equipped == it.id;
+    return (
+      `${it.emoji} *${it.item_name}*  [${it.rarity}]` +
+      `\n   📈 +${it.stat_value} ${it.stat_type}` +
+      `${isEquipped ? '   ✅ *Equipped*' : ''}`
+    );
+  });
+
+  const header =
+    `🎒 *Inventory* — ${items.length} item${items.length !== 1 ? 's' : ''}\n` +
+    `Page ${page + 1} / ${totalPages}\n` +
+    `───────────────────\n`;
+
+  return {
+    text: header + (lines.length ? lines.join('\n\n') : '_No items on this page._'),
+    pageItems,
+    totalPages,
+    page
+  };
+}
+
+function buildInventoryKeyboard(char, pageItems, page, totalPages) {
+  const rows = pageItems.map(it => {
+    const isEquipped = char.equipped == it.id;
+    const label = isEquipped
+      ? `✅ ${it.item_name} (equipped)`
+      : `🧤 Equip ${it.item_name}`;
+    return [Markup.button.callback(label, `inv_equip_${it.id}`)];
+  });
+
+  const navRow = [];
+  if (page > 0)             navRow.push(Markup.button.callback('◀️ Prev', `inv_page_${page - 1}`));
+  if (page < totalPages - 1) navRow.push(Markup.button.callback('Next ▶️', `inv_page_${page + 1}`));
+  if (navRow.length) rows.push(navRow);
+
+  return Markup.inlineKeyboard(rows);
+}
+
 bot.command('inventory', (ctx) => {
   const char = getChar(ctx.from.id);
   if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
 
   const items = db.prepare('SELECT * FROM inventory WHERE user_id = ? ORDER BY obtained_at DESC').all(ctx.from.id);
-
-  if (!items.length) return ctx.replyWithMarkdown('🎒 *Inventory empty!*\n\nComplete missions to earn items.');
-
-  const rarityOrder = { Legendary: 0, Epic: 1, Rare: 2, Uncommon: 3, Common: 4 };
-  items.sort((a, b) => rarityOrder[a.rarity] - rarityOrder[b.rarity]);
-
-  const lines = items.map(it =>
-    `${it.emoji} *${it.item_name}* [${it.rarity}]\n   +${it.stat_value} ${it.stat_type}${char.equipped == it.id ? ' ✅ *Equipped*' : ''}`
-  );
-
-  const pages = [];
-  for (let i = 0; i < lines.length; i += 10) {
-    pages.push(lines.slice(i, i + 10).join('\n'));
+  if (!items.length) {
+    return ctx.replyWithMarkdown(
+      `🎒 *Your bag is empty!*\n\n` +
+      `Complete missions to earn weapons, armor & trinkets.\n\n` +
+      `_Use /mission to venture out._`
+    );
   }
 
-  ctx.replyWithMarkdown(`🎒 *Inventory* (${items.length} items)\n\n${pages[0]}\n\n_Use /equip [item name] to equip._`);
+  const { text, pageItems, totalPages, page } = buildInventoryMessage(char, items, 0);
+  const keyboard = buildInventoryKeyboard(char, pageItems, page, totalPages);
+
+  ctx.replyWithMarkdown(text, keyboard);
 });
 
-// ─── /equip ───────────────────────────────────────────────────────────────────
-bot.command('equip', (ctx) => {
+// Pagination callback
+bot.action(/^inv_page_(\d+)$/, (ctx) => {
+  const page = parseInt(ctx.match[1]);
   const char = getChar(ctx.from.id);
-  if (!char) return ctx.replyWithMarkdown('❌ No hero found. Use /create to begin.');
+  if (!char) return ctx.answerCbQuery('No character found!');
 
-  const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!args) return ctx.replyWithMarkdown('Usage: /equip [item name]\n\nExample: /equip Shadowblade');
+  const items = db.prepare('SELECT * FROM inventory WHERE user_id = ? ORDER BY obtained_at DESC').all(ctx.from.id);
+  const { text, pageItems, totalPages } = buildInventoryMessage(char, items, page);
+  const keyboard = buildInventoryKeyboard(char, pageItems, page, totalPages);
 
-  const items = db.prepare('SELECT * FROM inventory WHERE user_id = ?').all(ctx.from.id);
-  const item = items.find(it => it.item_name.toLowerCase().includes(args.toLowerCase()));
+  ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+  ctx.answerCbQuery();
+});
 
-  if (!item) return ctx.replyWithMarkdown(`❌ Item "*${args}*" not found in your inventory.\n\nUse /inventory to see your items.`);
+// Equip callback — tap the button, item equips instantly
+bot.action(/^inv_equip_(\d+)$/, (ctx) => {
+  const itemId = parseInt(ctx.match[1]);
+  const char = getChar(ctx.from.id);
+  if (!char) return ctx.answerCbQuery('No character found!');
+
+  const item = db.prepare('SELECT * FROM inventory WHERE id = ? AND user_id = ?').get(itemId, ctx.from.id);
+  if (!item) return ctx.answerCbQuery('Item not found!');
+
+  // Already equipped — do nothing but confirm
+  if (char.equipped == itemId) {
+    return ctx.answerCbQuery(`${item.emoji} Already equipped!`);
+  }
 
   // Remove old equipped stat bonus
   if (char.equipped) {
     const old = db.prepare('SELECT * FROM inventory WHERE id = ?').get(char.equipped);
-    if (old) {
-      const stat = old.stat_type;
-      const val = old.stat_value;
-      if (STAT_TYPES.includes(stat)) {
-        db.prepare(`UPDATE characters SET ${stat} = MAX(0, ${stat} - ?) WHERE user_id = ?`).run(val, ctx.from.id);
-      }
+    if (old && STAT_TYPES.includes(old.stat_type)) {
+      db.prepare(`UPDATE characters SET ${old.stat_type} = MAX(0, ${old.stat_type} - ?) WHERE user_id = ?`)
+        .run(old.stat_value, ctx.from.id);
     }
   }
 
   // Apply new item stat
-  const stat = item.stat_type;
-  if (STAT_TYPES.includes(stat)) {
-    db.prepare(`UPDATE characters SET ${stat} = ${stat} + ? WHERE user_id = ?`).run(item.stat_value, ctx.from.id);
+  if (STAT_TYPES.includes(item.stat_type)) {
+    db.prepare(`UPDATE characters SET ${item.stat_type} = ${item.stat_type} + ? WHERE user_id = ?`)
+      .run(item.stat_value, ctx.from.id);
   }
-
   db.prepare('UPDATE characters SET equipped = ? WHERE user_id = ?').run(item.id, ctx.from.id);
 
-  ctx.replyWithMarkdown(
-    `✅ *Equipped!*\n\n` +
-    `${item.emoji} *${item.item_name}* [${item.rarity}]\n` +
-    `📈 +${item.stat_value} *${item.stat_type}* applied to your stats.\n\n` +
-    `_Use /profile to see updated stats._`
-  );
+  ctx.answerCbQuery(`${item.emoji} ${item.item_name} equipped! +${item.stat_value} ${item.stat_type}`);
+
+  // Refresh the inventory message in place
+  const updatedChar = getChar(ctx.from.id);
+  const items = db.prepare('SELECT * FROM inventory WHERE user_id = ? ORDER BY obtained_at DESC').all(ctx.from.id);
+
+  // Determine current page from message text (fall back to 0)
+  let currentPage = 0;
+  try {
+    const match = ctx.callbackQuery.message.text.match(/Page (\d+) \//);
+    if (match) currentPage = parseInt(match[1]) - 1;
+  } catch (_) {}
+
+  const { text, pageItems, totalPages } = buildInventoryMessage(updatedChar, items, currentPage);
+  const keyboard = buildInventoryKeyboard(updatedChar, pageItems, currentPage, totalPages);
+
+  ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
 });
 
 // ─── /top ─────────────────────────────────────────────────────────────────────
