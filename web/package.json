@@ -1,7 +1,7 @@
 {
-  "name": "astralis-rpg",
+  "name": "web",
   "version": "1.0.0",
-  "description": "ASTRALIS RPG - Gaming Dashboard & Bot",
+  "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
@@ -9,9 +9,10 @@
     "start": "next start",
     "lint": "next lint"
   },
-  "keywords": ["gaming", "telegram", "rpg"],
-  "author": "ASTRALIS",
+  "keywords": [],
+  "author": "",
   "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
