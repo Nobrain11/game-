@@ -11,6 +11,9 @@
     "better-sqlite3": "^9.4.3",
     "dotenv": "^16.4.5"
   },
+  "optionalDependencies": {
+    "sql.js": "^1.10.3"
+  },
   "engines": {
     "node": ">=18"
   }
