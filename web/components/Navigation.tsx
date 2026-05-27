@@ -7,43 +7,43 @@ export default function Navigation() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-purple-500/20">
+    <nav className="sticky top-0 z-50 bg-[#0a0a0a]/80 backdrop-blur-md border-b border-[#2a2a2a]">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center space-x-2">
-            <span className="text-2xl font-bold gradient-text">ASTRALIS</span>
+            <span className="text-2xl font-bold text-white">ASTRALIS<span className="text-[#00d9a3]">.io</span></span>
           </Link>
 
           {/* Desktop Menu */}
           <div className="hidden md:flex items-center space-x-8">
             <Link
               href="/"
-              className="text-gray-300 hover:text-accent transition-colors"
+              className="text-gray-400 hover:text-[#00d9a3] transition-colors"
             >
               Dashboard
             </Link>
             <Link
               href="/leaderboard"
-              className="text-gray-300 hover:text-accent transition-colors"
+              className="text-gray-400 hover:text-[#00d9a3] transition-colors"
             >
               Leaderboard
             </Link>
             <Link
               href="/activity"
-              className="text-gray-300 hover:text-accent transition-colors"
+              className="text-gray-400 hover:text-[#00d9a3] transition-colors"
             >
               Activity
             </Link>
             <Link
               href="/market"
-              className="text-gray-300 hover:text-accent transition-colors"
+              className="text-gray-400 hover:text-[#00d9a3] transition-colors"
             >
               Market
             </Link>
             <a
               href="https://t.me/astralis_rpg_bot"
-              className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+              className="bg-[#00d9a3] hover:bg-[#00b388] text-black font-bold py-2 px-4 rounded transition-colors"
             >
               Play
             </a>
