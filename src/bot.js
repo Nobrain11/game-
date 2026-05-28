@@ -13,6 +13,16 @@ const battleEngine = require('./game/battleEngine');
 const startCommand = require('./commands/start');
 const profileCommand = require('./commands/profile');
 const missionCommand = require('./commands/mission');
+const createCommand = require('./commands/create');
+const battleCommand = require('./commands/battle');
+const inventoryCommand = require('./commands/inventory');
+const marketCommand = require('./commands/market');
+const guildCommand = require('./commands/guild');
+const dailyCommand = require('./commands/daily');
+const leaderboardCommand = require('./commands/leaderboard');
+const upgradeCommand = require('./commands/upgrade');
+const collectCommand = require('./commands/collect');
+const helpCommand = require('./commands/help');
 
 // Utils
 const { formatNumber } = require('./utils/formatters');
@@ -27,13 +37,21 @@ const bot = new Telegraf(config.BOT_TOKEN);
 bot.use(authMiddleware);
 
 // Start command
-bot.command('start', startCommand.handler);
+bot.command('start', startCommand);
 
-// Profile command
-bot.command('profile', profileCommand.handler);
-
-// Mission command
-bot.command('mission', missionCommand.handler);
+// Core commands
+bot.command('create', createCommand);
+bot.command('profile', profileCommand);
+bot.command('mission', missionCommand);
+bot.command('battle', battleCommand);
+bot.command('inventory', inventoryCommand);
+bot.command('market', marketCommand);
+bot.command('guild', guildCommand);
+bot.command('daily', dailyCommand);
+bot.command('leaderboard', leaderboardCommand);
+bot.command('upgrade', upgradeCommand);
+bot.command('collect', collectCommand);
+bot.command('help', helpCommand);
 
 // Collect rewards
 bot.command('collect', async (ctx) => {
