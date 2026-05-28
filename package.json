@@ -12,9 +12,6 @@
   "keywords": ["gaming", "telegram", "rpg"],
   "author": "ASTRALIS",
   "license": "ISC",
-  "engines": {
-    "node": ">=20.9.0"
-  },
   "dependencies": {
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
@@ -23,7 +20,7 @@
     "postcss": "^8.5.15",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "tailwindcss": "^3.4.0",
+    "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3"
   }
 }
