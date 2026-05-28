@@ -9,21 +9,25 @@
     "start": "next start",
     "lint": "next lint"
   },
-  "keywords": ["gaming", "telegram", "rpg"],
+  "keywords": [
+    "gaming",
+    "telegram",
+    "rpg"
+  ],
   "author": "ASTRALIS",
   "license": "ISC",
-  "engines": {
-    "node": ">=20.9.0"
-  },
   "dependencies": {
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "autoprefixer": "^10.5.0",
+    "better-sqlite3": "^12.10.0",
+    "dotenv": "^17.4.2",
     "next": "^16.2.6",
     "postcss": "^8.5.15",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "tailwindcss": "^3.4.0",
+    "tailwindcss": "^4.3.0",
+    "telegraf": "^4.16.3",
     "typescript": "^6.0.3"
   }
 }
